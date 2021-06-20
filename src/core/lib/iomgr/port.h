@@ -71,7 +71,7 @@
 #define GRPC_LINUX_EPOLL 1
 #endif
 #if __GLIBC_PREREQ(2, 9)
-#define GRPC_LINUX_EPOLL_CREATE1 1
+// #define GRPC_LINUX_EPOLL_CREATE1 1
 #define GRPC_LINUX_EVENTFD 1
 #endif
 #if __GLIBC_PREREQ(2, 10)
@@ -87,7 +87,7 @@
 #endif
 #ifndef __GLIBC__
 #define GRPC_LINUX_EPOLL 1
-#define GRPC_LINUX_EPOLL_CREATE1 1
+// #define GRPC_LINUX_EPOLL_CREATE1 1
 #define GRPC_LINUX_EVENTFD 1
 #define GRPC_MSG_IOVLEN_TYPE int
 #endif

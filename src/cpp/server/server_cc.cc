@@ -891,7 +891,7 @@ Server::Server(
       shutdown_notified_(false),
       server_(nullptr),
       server_initializer_(new ServerInitializer(this)),
-      health_check_service_disabled_(false) {
+      health_check_service_disabled_(true) {
   g_gli_initializer.summon();
   gpr_once_init(&grpc::g_once_init_callbacks, grpc::InitGlobalCallbacks);
   global_callbacks_ = grpc::g_callbacks;
@@ -1198,10 +1198,6 @@ void Server::Start(grpc::ServerCompletionQueue** cqs, size_t num_cqs) {
         absl::make_unique<grpc::internal::ResourceExhaustedHandler>();
   }
 
-  for (const auto& value : sync_req_mgrs_) {
-    value->Start();
-  }
-
   if (default_health_check_service_impl != nullptr) {
     default_health_check_service_impl->StartServingThread();
   }
@@ -1284,6 +1280,10 @@ void Server::ShutdownInternal(gpr_timespec deadline) {
 }
 
 void Server::Wait() {
+  for (const auto& value : sync_req_mgrs_) {
+    value->Start();
+  }
+
   grpc::internal::MutexLock lock(&mu_);
   while (started_ && !shutdown_notified_) {
     shutdown_cv_.Wait(&mu_);

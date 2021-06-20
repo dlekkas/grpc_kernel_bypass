@@ -54,7 +54,7 @@ ThreadManager::ThreadManager(const char* name,
                              int min_pollers, int max_pollers)
     : shutdown_(false),
       num_pollers_(0),
-      min_pollers_(min_pollers),
+      min_pollers_(0),
       max_pollers_(max_pollers == -1 ? INT_MAX : max_pollers),
       num_threads_(0),
       max_active_threads_sofar_(0) {
@@ -144,6 +144,8 @@ void ThreadManager::Initialize() {
     GPR_ASSERT(worker->created());  // Must be able to create the minimum
     worker->Start();
   }
+
+  MainWorkLoop();
 }
 
 void ThreadManager::MainWorkLoop() {
@@ -170,6 +172,7 @@ void ThreadManager::MainWorkLoop() {
         // If we got work and there are now insufficient pollers and there is
         // quota available to create a new thread, start a new poller thread
         bool resource_exhausted = false;
+	/*
         if (!shutdown_ && num_pollers_ < min_pollers_) {
           if (grpc_resource_user_allocate_threads(resource_user_, 1)) {
             // We can allocate a new poller thread
@@ -207,6 +210,8 @@ void ThreadManager::MainWorkLoop() {
           // the work and continue polling with our existing poller threads
           lock.Unlock();
         }
+	*/
+	lock.Unlock();
         // Lock is always released at this point - do the application work
         // or return resource exhausted if there is new work but we couldn't
         // get a thread in which to do it.

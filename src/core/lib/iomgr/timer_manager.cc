@@ -308,7 +308,7 @@ void grpc_timer_manager_init(void) {
   g_has_timed_waiter = false;
   g_timed_waiter_deadline = GRPC_MILLIS_INF_FUTURE;
 
-  start_threads();
+  // start_threads();
 }
 
 static void stop_threads(void) {

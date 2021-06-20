@@ -95,7 +95,7 @@ Executor::Executor(const char* name) : name_(name) {
   max_threads_ = GPR_MAX(1, 2 * gpr_cpu_num_cores());
 }
 
-void Executor::Init() { SetThreading(true); }
+void Executor::Init() { SetThreading(false); }
 
 size_t Executor::RunClosures(const char* executor_name,
                              grpc_closure_list list) {
