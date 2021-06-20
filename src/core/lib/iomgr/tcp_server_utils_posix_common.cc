@@ -42,6 +42,10 @@
 #include "src/core/lib/iomgr/sockaddr_utils.h"
 #include "src/core/lib/iomgr/unix_sockets_posix.h"
 
+#include "/data/f-stack/lib/ff_api.h"
+#include "/data/f-stack/lib/ff_epoll.h"
+#include "/data/f-stack/lib/ff_config.h"
+
 #define MIN_SAFE_ACCEPT_QUEUE_SIZE 100
 
 static gpr_once s_init_max_accept_queue_size = GPR_ONCE_INIT;
@@ -183,6 +187,27 @@ grpc_error* grpc_tcp_server_prepare_socket(grpc_tcp_server* s, int fd,
   err = grpc_apply_socket_mutator_in_args(fd, s->channel_args);
   if (err != GRPC_ERROR_NONE) goto error;
 
+	#ifdef KERNEL_BYPASS
+  if (ff_bind(fd, (struct linux_sockaddr *) reinterpret_cast<grpc_sockaddr*>(
+						  const_cast<char*>(addr->addr)), addr->len) < 0) {
+    err = GRPC_OS_ERROR(errno, "ff_bind");
+    goto error;
+  }
+
+  if (ff_listen(fd, get_max_accept_queue_size()) < 0) {
+    err = GRPC_OS_ERROR(errno, "ff_listen");
+    goto error;
+  }
+
+  sockname_temp.len = static_cast<socklen_t>(sizeof(struct sockaddr_storage));
+
+  if (ff_getsockname(fd, (struct linux_sockaddr *) 
+										 reinterpret_cast<grpc_sockaddr*>(sockname_temp.addr),
+                  	 &sockname_temp.len) < 0) {
+    err = GRPC_OS_ERROR(errno, "ff_getsockname");
+    goto error;
+  }
+	#else
   if (bind(fd, reinterpret_cast<grpc_sockaddr*>(const_cast<char*>(addr->addr)),
            addr->len) < 0) {
     err = GRPC_OS_ERROR(errno, "bind");
@@ -201,6 +226,7 @@ grpc_error* grpc_tcp_server_prepare_socket(grpc_tcp_server* s, int fd,
     err = GRPC_OS_ERROR(errno, "getsockname");
     goto error;
   }
+	#endif
 
   *port = grpc_sockaddr_get_port(&sockname_temp);
   return GRPC_ERROR_NONE;

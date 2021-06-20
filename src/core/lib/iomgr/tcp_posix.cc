@@ -60,6 +60,10 @@
 #include "src/core/lib/slice/slice_internal.h"
 #include "src/core/lib/slice/slice_string_helpers.h"
 
+#include "/data/f-stack/lib/ff_api.h"
+#include "/data/f-stack/lib/ff_config.h"
+#include "/data/f-stack/lib/ff_epoll.h"
+
 #ifndef SOL_TCP
 #define SOL_TCP IPPROTO_TCP
 #endif
@@ -749,7 +753,11 @@ static void tcp_do_read(grpc_tcp* tcp) {
     do {
       GPR_TIMER_SCOPE("recvmsg", 0);
       GRPC_STATS_INC_SYSCALL_READ();
+#ifdef KERNEL_BYPASS
+      read_bytes = ff_recvmsg(tcp->fd, &msg, 0);
+#else
       read_bytes = recvmsg(tcp->fd, &msg, 0);
+#endif
     } while (read_bytes < 0 && errno == EINTR);
 
     /* We have read something in previous reads. We need to deliver those
@@ -941,7 +949,11 @@ ssize_t tcp_send(int fd, const struct msghdr* msg, int additional_flags = 0) {
   do {
     /* TODO(klempner): Cork if this is a partial write */
     GRPC_STATS_INC_SYSCALL_WRITE();
+#ifdef KERNEL_BYPASS
+    sent_length = ff_sendmsg(fd, msg, SENDMSG_FLAGS | additional_flags);
+#else
     sent_length = sendmsg(fd, msg, SENDMSG_FLAGS | additional_flags);
+#endif
   } while (sent_length < 0 && errno == EINTR);
   return sent_length;
 }
@@ -1166,7 +1178,11 @@ static bool process_errors(grpc_tcp* tcp) {
   int r, saved_errno;
   while (true) {
     do {
+#ifdef KERNEL_BYPASS
+      r = ff_recvmsg(tcp->fd, &msg, MSG_ERRQUEUE);
+#else
       r = recvmsg(tcp->fd, &msg, MSG_ERRQUEUE);
+#endif
       saved_errno = errno;
     } while (r < 0 && saved_errno == EINTR);
 
@@ -1765,9 +1781,15 @@ grpc_endpoint* grpc_tcp_create(grpc_fd* em_fd,
   grpc_resolved_address resolved_local_addr;
   memset(&resolved_local_addr, 0, sizeof(resolved_local_addr));
   resolved_local_addr.len = sizeof(resolved_local_addr.addr);
+#ifdef KERNEL_BYPASS
+  if (ff_getsockname(tcp->fd, (struct linux_sockaddr *)
+                     reinterpret_cast<sockaddr*>(resolved_local_addr.addr),
+                     &resolved_local_addr.len) < 0) {
+#else
   if (getsockname(tcp->fd,
                   reinterpret_cast<sockaddr*>(resolved_local_addr.addr),
                   &resolved_local_addr.len) < 0) {
+#endif
     tcp->local_address = "";
   } else {
     tcp->local_address = grpc_sockaddr_to_uri(&resolved_local_addr);
@@ -1791,8 +1813,13 @@ grpc_endpoint* grpc_tcp_create(grpc_fd* em_fd,
   if (tcp_tx_zerocopy_enabled && !tcp->tcp_zerocopy_send_ctx.memory_limited()) {
 #ifdef GRPC_LINUX_ERRQUEUE
     const int enable = 1;
+#ifdef KERNEL_BYPASS
+    auto err = ff_setsockopt(tcp->fd, SOL_SOCKET, SO_ZEROCOPY, &enable,
+		             sizeof(enable));
+#else
     auto err =
         setsockopt(tcp->fd, SOL_SOCKET, SO_ZEROCOPY, &enable, sizeof(enable));
+#endif
     if (err == 0) {
       tcp->tcp_zerocopy_send_ctx.set_enabled(true);
     } else {

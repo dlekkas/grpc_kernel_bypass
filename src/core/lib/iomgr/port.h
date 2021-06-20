@@ -75,7 +75,7 @@
 #define GRPC_LINUX_EVENTFD 1
 #endif
 #if __GLIBC_PREREQ(2, 10)
-#define GRPC_LINUX_SOCKETUTILS 1
+// #define GRPC_LINUX_SOCKETUTILS 1
 #endif
 #if !(__GLIBC_PREREQ(2, 17))
 /*

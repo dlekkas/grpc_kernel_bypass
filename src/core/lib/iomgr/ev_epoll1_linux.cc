@@ -60,6 +60,10 @@
 #include "src/core/lib/iomgr/wakeup_fd_posix.h"
 #include "src/core/lib/profiling/timers.h"
 
+
+#include "/data/f-stack/lib/ff_api.h"
+#include "/data/f-stack/lib/ff_epoll.h"
+
 static grpc_wakeup_fd global_wakeup_fd;
 
 /*******************************************************************************
@@ -101,7 +105,11 @@ static int epoll_create_and_cloexec() {
     gpr_log(GPR_ERROR, "epoll_create1 unavailable");
   }
 #else
+	#ifdef KERNEL_BYPASS
+	int fd = ff_epoll_create(MAX_EPOLL_EVENTS);
+	#else
   int fd = epoll_create(MAX_EPOLL_EVENTS);
+	#endif
   if (fd < 0) {
     gpr_log(GPR_ERROR, "epoll_create unavailable");
   } else if (fcntl(fd, F_SETFD, FD_CLOEXEC) != 0) {
@@ -370,9 +378,15 @@ static grpc_fd* fd_create(int fd, const char* name, bool track_err) {
    * returned to the free list at that point. */
   ev.data.ptr = reinterpret_cast<void*>(reinterpret_cast<intptr_t>(new_fd) |
                                         (track_err ? 1 : 0));
+#ifdef KERNEL_BYPASS
+  if (ff_epoll_ctl(g_epoll_set.epfd, EPOLL_CTL_ADD, fd, &ev) != 0) {
+    gpr_log(GPR_ERROR, "epoll_ctl failed: %s", strerror(errno));
+  }
+#else
   if (epoll_ctl(g_epoll_set.epfd, EPOLL_CTL_ADD, fd, &ev) != 0) {
     gpr_log(GPR_ERROR, "epoll_ctl failed: %s", strerror(errno));
   }
+#endif
 
   return new_fd;
 }
@@ -386,7 +400,11 @@ static void fd_shutdown_internal(grpc_fd* fd, grpc_error* why,
                                  bool releasing_fd) {
   if (fd->read_closure->SetShutdown(GRPC_ERROR_REF(why))) {
     if (!releasing_fd) {
+#ifdef KERNEL_BYPASS
+      ff_shutdown(fd->fd, SHUT_RDWR);
+#else
       shutdown(fd->fd, SHUT_RDWR);
+#endif
     } else {
       /* we need a dummy event for earlier linux versions. */
       epoll_event dummy_event;
@@ -524,10 +542,17 @@ static grpc_error* pollset_global_init(void) {
   struct epoll_event ev;
   ev.events = static_cast<uint32_t>(EPOLLIN | EPOLLET);
   ev.data.ptr = &global_wakeup_fd;
+	#ifdef KERNEL_BYPASS
+  if (ff_epoll_ctl(g_epoll_set.epfd, EPOLL_CTL_ADD, global_wakeup_fd.read_fd,
+                &ev) != 0) {
+    return GRPC_OS_ERROR(errno, "ff_epoll_ctl");
+  }
+	#else
   if (epoll_ctl(g_epoll_set.epfd, EPOLL_CTL_ADD, global_wakeup_fd.read_fd,
                 &ev) != 0) {
     return GRPC_OS_ERROR(errno, "epoll_ctl");
   }
+	#endif
   g_num_neighborhoods = GPR_CLAMP(gpr_cpu_num_cores(), 1, MAX_NEIGHBORHOODS);
   g_neighborhoods = static_cast<pollset_neighborhood*>(
       gpr_zalloc(sizeof(*g_neighborhoods) * g_num_neighborhoods));
@@ -725,8 +750,13 @@ static grpc_error* do_epoll_wait(grpc_pollset* ps, grpc_millis deadline) {
   }
   do {
     GRPC_STATS_INC_SYSCALL_POLL();
+#ifdef KERNEL_BYPASS
+    r = ff_epoll_wait(g_epoll_set.epfd, g_epoll_set.events, MAX_EPOLL_EVENTS,
+                      timeout);
+#else
     r = epoll_wait(g_epoll_set.epfd, g_epoll_set.events, MAX_EPOLL_EVENTS,
                    timeout);
+#endif
   } while (r < 0 && errno == EINTR);
   if (timeout != 0) {
     GRPC_SCHEDULING_END_BLOCKING_REGION;

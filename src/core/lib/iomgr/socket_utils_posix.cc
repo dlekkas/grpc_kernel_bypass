@@ -31,9 +31,30 @@
 #include <grpc/support/log.h>
 #include "src/core/lib/iomgr/sockaddr.h"
 
+#include "/data/f-stack/lib/ff_api.h"
+#include "/data/f-stack/lib/ff_config.h"
+#include "/data/f-stack/lib/ff_epoll.h"
+
 int grpc_accept4(int sockfd, grpc_resolved_address* resolved_addr, int nonblock,
                  int cloexec) {
   int fd, flags;
+#ifdef KERNEL_BYPASS
+  fd = ff_accept(sockfd, (struct linux_sockaddr *) 
+		 reinterpret_cast<grpc_sockaddr*>(resolved_addr->addr),
+                 &resolved_addr->len);
+  if (fd >= 0) {
+    if (nonblock) {
+      flags = ff_fcntl(fd, F_GETFL, 0);
+      if (flags < 0) goto close_and_error;
+      if (ff_fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0) goto close_and_error;
+    }
+    if (cloexec) {
+      flags = ff_fcntl(fd, F_GETFD, 0);
+      if (flags < 0) goto close_and_error;
+      if (ff_fcntl(fd, F_SETFD, flags | FD_CLOEXEC) != 0) goto close_and_error;
+    }
+  }
+#else
   fd = accept(sockfd, reinterpret_cast<grpc_sockaddr*>(resolved_addr->addr),
               &resolved_addr->len);
   if (fd >= 0) {
@@ -48,10 +69,15 @@ int grpc_accept4(int sockfd, grpc_resolved_address* resolved_addr, int nonblock,
       if (fcntl(fd, F_SETFD, flags | FD_CLOEXEC) != 0) goto close_and_error;
     }
   }
+#endif
   return fd;
 
 close_and_error:
+#ifdef KERNEL_BYPASS
+  ff_close(fd);
+#else
   close(fd);
+#endif
   return -1;
 }
 

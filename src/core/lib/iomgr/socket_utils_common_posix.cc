@@ -25,6 +25,10 @@
 #include "src/core/lib/iomgr/socket_utils.h"
 #include "src/core/lib/iomgr/socket_utils_posix.h"
 
+#include "/data/f-stack/lib/ff_api.h"
+#include "/data/f-stack/lib/ff_epoll.h"
+#include "/data/f-stack/lib/ff_config.h"
+
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -39,6 +43,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 
 #include <string>
@@ -68,6 +73,10 @@ grpc_error* grpc_set_socket_zerocopy(int fd) {
 
 /* set a socket to non blocking mode */
 grpc_error* grpc_set_socket_nonblocking(int fd, int non_blocking) {
+#ifdef KERNEL_BYPASS
+	int on = 1;
+	ff_ioctl(fd, FIONBIO, &on);
+#else
   int oldflags = fcntl(fd, F_GETFL, 0);
   if (oldflags < 0) {
     return GRPC_OS_ERROR(errno, "fcntl");
@@ -82,7 +91,7 @@ grpc_error* grpc_set_socket_nonblocking(int fd, int non_blocking) {
   if (fcntl(fd, F_SETFL, oldflags) != 0) {
     return GRPC_OS_ERROR(errno, "fcntl");
   }
-
+#endif
   return GRPC_ERROR_NONE;
 }
 
@@ -149,7 +158,11 @@ grpc_error* grpc_set_socket_rcvbuf(int fd, int buffer_size_bytes) {
 
 /* set a socket to close on exec */
 grpc_error* grpc_set_socket_cloexec(int fd, int close_on_exec) {
+#ifdef KERNEL_BYPASS
+  int oldflags = ff_fcntl(fd, F_GETFD, 0);
+#else
   int oldflags = fcntl(fd, F_GETFD, 0);
+#endif
   if (oldflags < 0) {
     return GRPC_OS_ERROR(errno, "fcntl");
   }
@@ -160,9 +173,15 @@ grpc_error* grpc_set_socket_cloexec(int fd, int close_on_exec) {
     oldflags &= ~FD_CLOEXEC;
   }
 
+#ifdef KERNEL_BYPASS
+  if (ff_fcntl(fd, F_SETFD, oldflags) != 0) {
+    return GRPC_OS_ERROR(errno, "ff_fcntl");
+  }
+#else
   if (fcntl(fd, F_SETFD, oldflags) != 0) {
     return GRPC_OS_ERROR(errno, "fcntl");
   }
+#endif
 
   return GRPC_ERROR_NONE;
 }
@@ -172,12 +191,21 @@ grpc_error* grpc_set_socket_reuse_addr(int fd, int reuse) {
   int val = (reuse != 0);
   int newval;
   socklen_t intlen = sizeof(newval);
+#ifdef KERNEL_BYPASS
+  if (0 != ff_setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val))) {
+    return GRPC_OS_ERROR(errno, "ff_setsockopt(SO_REUSEADDR)");
+  }
+  if (0 != ff_getsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &newval, &intlen)) {
+    return GRPC_OS_ERROR(errno, "ff_getsockopt(SO_REUSEADDR)");
+  }
+#else
   if (0 != setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val))) {
     return GRPC_OS_ERROR(errno, "setsockopt(SO_REUSEADDR)");
   }
   if (0 != getsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &newval, &intlen)) {
     return GRPC_OS_ERROR(errno, "getsockopt(SO_REUSEADDR)");
   }
+#endif
   if ((newval != 0) != val) {
     return GRPC_ERROR_CREATE_FROM_STATIC_STRING("Failed to set SO_REUSEADDR");
   }
@@ -194,12 +222,21 @@ grpc_error* grpc_set_socket_reuse_port(int fd, int reuse) {
   int val = (reuse != 0);
   int newval;
   socklen_t intlen = sizeof(newval);
+	#ifdef KERNEL_BYPASS
+  if (0 != ff_setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &val, sizeof(val))) {
+    return GRPC_OS_ERROR(errno, "ff_setsockopt(SO_REUSEPORT)");
+  }
+  if (0 != ff_getsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &newval, &intlen)) {
+    return GRPC_OS_ERROR(errno, "ff_getsockopt(SO_REUSEPORT)");
+  }
+	#else
   if (0 != setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &val, sizeof(val))) {
     return GRPC_OS_ERROR(errno, "setsockopt(SO_REUSEPORT)");
   }
   if (0 != getsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &newval, &intlen)) {
     return GRPC_OS_ERROR(errno, "getsockopt(SO_REUSEPORT)");
   }
+	#endif
   if ((newval != 0) != val) {
     return GRPC_ERROR_CREATE_FROM_STATIC_STRING("Failed to set SO_REUSEPORT");
   }
@@ -212,6 +249,19 @@ static gpr_once g_probe_so_reuesport_once = GPR_ONCE_INIT;
 static int g_support_so_reuseport = false;
 
 void probe_so_reuseport_once(void) {
+	#ifdef KERNEL_BYPASS
+  int s = ff_socket(AF_INET, SOCK_STREAM, 0);
+  if (s < 0) {
+    /* This might be an ipv6-only environment in which case 'socket(AF_INET,..)'
+       call would fail. Try creating IPv6 socket in that case */
+    s = ff_socket(AF_INET6, SOCK_STREAM, 0);
+  }
+  if (s >= 0) {
+    g_support_so_reuseport = GRPC_LOG_IF_ERROR(
+        "check for SO_REUSEPORT", grpc_set_socket_reuse_port(s, 1));
+    ff_close(s);
+  }
+	#else
   int s = socket(AF_INET, SOCK_STREAM, 0);
   if (s < 0) {
     /* This might be an ipv6-only environment in which case 'socket(AF_INET,..)'
@@ -223,6 +273,7 @@ void probe_so_reuseport_once(void) {
         "check for SO_REUSEPORT", grpc_set_socket_reuse_port(s, 1));
     close(s);
   }
+	#endif
 }
 
 bool grpc_is_socket_reuse_port_supported() {
@@ -235,12 +286,21 @@ grpc_error* grpc_set_socket_low_latency(int fd, int low_latency) {
   int val = (low_latency != 0);
   int newval;
   socklen_t intlen = sizeof(newval);
+#ifdef KERNEL_BYPASS
+  if (0 != ff_setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &val, sizeof(val))) {
+    return GRPC_OS_ERROR(errno, "ff_setsockopt(TCP_NODELAY)");
+  }
+  if (0 != ff_getsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &newval, &intlen)) {
+    return GRPC_OS_ERROR(errno, "ff_getsockopt(TCP_NODELAY)");
+  }
+#else
   if (0 != setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &val, sizeof(val))) {
     return GRPC_OS_ERROR(errno, "setsockopt(TCP_NODELAY)");
   }
   if (0 != getsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &newval, &intlen)) {
     return GRPC_OS_ERROR(errno, "getsockopt(TCP_NODELAY)");
   }
+#endif
   if ((newval != 0) != val) {
     return GRPC_ERROR_CREATE_FROM_STATIC_STRING("Failed to set TCP_NODELAY");
   }
@@ -343,6 +403,19 @@ grpc_error* grpc_set_socket_tcp_user_timeout(
       // If this is the first time to use TCP_USER_TIMEOUT, try to check
       // if it is available.
       if (g_socket_supports_tcp_user_timeout.load() == 0) {
+#ifdef KERNEL_BYPASS
+        if (0 != ff_getsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT, &newval, &len)) {
+          gpr_log(GPR_INFO,
+                  "TCP_USER_TIMEOUT is not available. TCP_USER_TIMEOUT won't "
+                  "be used thereafter");
+          g_socket_supports_tcp_user_timeout.store(-1);
+        } else {
+          gpr_log(GPR_INFO,
+                  "TCP_USER_TIMEOUT is available. TCP_USER_TIMEOUT will be "
+                  "used thereafter");
+          g_socket_supports_tcp_user_timeout.store(1);
+        }
+#else
         if (0 != getsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT, &newval, &len)) {
           gpr_log(GPR_INFO,
                   "TCP_USER_TIMEOUT is not available. TCP_USER_TIMEOUT won't "
@@ -354,12 +427,26 @@ grpc_error* grpc_set_socket_tcp_user_timeout(
                   "used thereafter");
           g_socket_supports_tcp_user_timeout.store(1);
         }
+#endif
       }
       if (g_socket_supports_tcp_user_timeout.load() > 0) {
         if (GRPC_TRACE_FLAG_ENABLED(grpc_tcp_trace)) {
           gpr_log(GPR_INFO, "Enabling TCP_USER_TIMEOUT with a timeout of %d ms",
                   timeout);
         }
+#ifdef KERNEL_BYPASS
+        if (0 != ff_setsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT, &timeout,
+                            sizeof(timeout))) {
+          gpr_log(GPR_ERROR, "ff_setsockopt(TCP_USER_TIMEOUT) %s",
+                  strerror(errno));
+          return GRPC_ERROR_NONE;
+        }
+        if (0 != ff_getsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT, &newval, &len)) {
+          gpr_log(GPR_ERROR, "ff_getsockopt(TCP_USER_TIMEOUT) %s",
+                  strerror(errno));
+          return GRPC_ERROR_NONE;
+        }
+#else
         if (0 != setsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT, &timeout,
                             sizeof(timeout))) {
           gpr_log(GPR_ERROR, "setsockopt(TCP_USER_TIMEOUT) %s",
@@ -371,6 +458,7 @@ grpc_error* grpc_set_socket_tcp_user_timeout(
                   strerror(errno));
           return GRPC_ERROR_NONE;
         }
+#endif
         if (newval != timeout) {
           /* Do not fail on failing to set TCP_USER_TIMEOUT for now. */
           gpr_log(GPR_ERROR, "Failed to set TCP_USER_TIMEOUT");
@@ -454,9 +542,13 @@ grpc_error* grpc_create_dualstack_socket(
 
 static int create_socket(grpc_socket_factory* factory, int domain, int type,
                          int protocol) {
+	#ifdef KERNEL_BYPASS
+	int s = ff_socket(domain, type, protocol);
+	#else
+	int s = socket(domain, type, protocol);
+	#endif
   return (factory != nullptr)
-             ? grpc_socket_factory_socket(factory, domain, type, protocol)
-             : socket(domain, type, protocol);
+             ? grpc_socket_factory_socket(factory, domain, type, protocol) : s;
 }
 
 grpc_error* grpc_create_dualstack_socket_using_factory(
