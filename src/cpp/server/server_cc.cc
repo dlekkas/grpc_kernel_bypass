@@ -759,7 +759,7 @@ class Server::SyncRequestThreadManager : public grpc::ThreadManager {
       : ThreadManager("SyncServer", rq, min_pollers, max_pollers),
         server_(server),
         server_cq_(server_cq),
-        cq_timeout_msec_(100),
+        cq_timeout_msec_(cq_timeout_msec),
         global_callbacks_(std::move(global_callbacks)) {}
 
   WorkStatus PollForWork(void** tag, bool* ok) override {
@@ -906,6 +906,9 @@ Server::Server(
       default_rq_created = true;
     }
 
+    // Here we need to poll with no timeouts since F-stack needs to poll the
+    // NIC as well in order to deliver events to the application asap.
+    sync_cq_timeout_msec = 0;
     for (const auto& it : *sync_server_cqs_) {
       sync_req_mgrs_.emplace_back(new SyncRequestThreadManager(
           this, it.get(), global_callbacks_, server_rq, min_pollers,

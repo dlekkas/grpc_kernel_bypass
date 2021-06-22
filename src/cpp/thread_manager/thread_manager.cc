@@ -152,11 +152,12 @@ void ThreadManager::Initialize() {
   MainWorkLoop();
 }
 
-int weird_test(void *arg) {	
-	ThreadManager* p = static_cast<ThreadManager*>(arg);
-	std::cout << "weird_test()" << std::endl;
-	p->FstackCb(nullptr);
-	return 1;
+int FstackCbStaticWrapper(void *arg) {  
+  int ret;
+  ThreadManager* p = static_cast<ThreadManager*>(arg);
+  std::cout << "FstackCbStaticWrapper()" << std::endl;
+  ret = p->FstackCb(nullptr);
+  return ret;
 }
 
 int ThreadManager::FstackCb(void* arg) {
@@ -182,7 +183,7 @@ int ThreadManager::FstackCb(void* arg) {
         // If we got work and there are now insufficient pollers and there is
         // quota available to create a new thread, start a new poller thread
         bool resource_exhausted = false;
-	/*
+        /*
         if (!shutdown_ && num_pollers_ < min_pollers_) {
           if (grpc_resource_user_allocate_threads(resource_user_, 1)) {
             // We can allocate a new poller thread
@@ -220,18 +221,15 @@ int ThreadManager::FstackCb(void* arg) {
           // the work and continue polling with our existing poller threads
           lock.Unlock();
         }
-	*/
-	lock.Unlock();
+        */
         // Lock is always released at this point - do the application work
         // or return resource exhausted if there is new work but we couldn't
         // get a thread in which to do it.
-	std::cout << "DoWork()" << std::endl;
+        std::cout << "DoWork()" << std::endl;
+        lock.Unlock();
         DoWork(tag, ok, !resource_exhausted);
         // Take the lock again to check post conditions
         lock.Lock();
-        // If we're shutdown, we should finish at this point.
-        // if (shutdown_) done = true;
-        // break;
     }
     // If we decided to finish the thread, break out of the while loop
     // if (done) break;
@@ -265,20 +263,15 @@ int ThreadManager::FstackCb(void* arg) {
     // avalanche.
     if (num_pollers_ < max_pollers_) {
       num_pollers_++;
-    } else {
-      //break;
-    }
-		return 0;
+    } 
+    return 0;
 }
 
 
 
 void ThreadManager::MainWorkLoop() {
 
-	ff_run(weird_test, this);
-	//while (true) {
-		//FstackCb(nullptr);
-  //}
+  ff_run(FstackCbStaticWrapper, this);
 
   // This thread is exiting. Do some cleanup work i.e delete already completed
   // worker threads
