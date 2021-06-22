@@ -47,7 +47,6 @@
 #include <unistd.h>
 
 #include <string>
-#include <iostream>
 
 #include <grpc/support/alloc.h>
 #include <grpc/support/log.h>
@@ -75,8 +74,8 @@ grpc_error* grpc_set_socket_zerocopy(int fd) {
 /* set a socket to non blocking mode */
 grpc_error* grpc_set_socket_nonblocking(int fd, int non_blocking) {
 #ifdef KERNEL_BYPASS
-	int on = 1;
-	ff_ioctl(fd, FIONBIO, &on);
+  int on = 1;
+  ff_ioctl(fd, FIONBIO, &on);
 #else
   int oldflags = fcntl(fd, F_GETFL, 0);
   if (oldflags < 0) {
@@ -223,21 +222,21 @@ grpc_error* grpc_set_socket_reuse_port(int fd, int reuse) {
   int val = (reuse != 0);
   int newval;
   socklen_t intlen = sizeof(newval);
-	#ifdef KERNEL_BYPASS
+  #ifdef KERNEL_BYPASS
   if (0 != ff_setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &val, sizeof(val))) {
     return GRPC_OS_ERROR(errno, "ff_setsockopt(SO_REUSEPORT)");
   }
   if (0 != ff_getsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &newval, &intlen)) {
     return GRPC_OS_ERROR(errno, "ff_getsockopt(SO_REUSEPORT)");
   }
-	#else
+  #else
   if (0 != setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &val, sizeof(val))) {
     return GRPC_OS_ERROR(errno, "setsockopt(SO_REUSEPORT)");
   }
   if (0 != getsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &newval, &intlen)) {
     return GRPC_OS_ERROR(errno, "getsockopt(SO_REUSEPORT)");
   }
-	#endif
+  #endif
   if ((newval != 0) != val) {
     return GRPC_ERROR_CREATE_FROM_STATIC_STRING("Failed to set SO_REUSEPORT");
   }
@@ -250,7 +249,7 @@ static gpr_once g_probe_so_reuesport_once = GPR_ONCE_INIT;
 static int g_support_so_reuseport = false;
 
 void probe_so_reuseport_once(void) {
-	#ifdef KERNEL_BYPASS
+  #ifdef KERNEL_BYPASS
   int s = ff_socket(AF_INET, SOCK_STREAM, 0);
   if (s < 0) {
     /* This might be an ipv6-only environment in which case 'socket(AF_INET,..)'
@@ -262,7 +261,7 @@ void probe_so_reuseport_once(void) {
         "check for SO_REUSEPORT", grpc_set_socket_reuse_port(s, 1));
     ff_close(s);
   }
-	#else
+  #else
   int s = socket(AF_INET, SOCK_STREAM, 0);
   if (s < 0) {
     /* This might be an ipv6-only environment in which case 'socket(AF_INET,..)'
@@ -274,7 +273,7 @@ void probe_so_reuseport_once(void) {
         "check for SO_REUSEPORT", grpc_set_socket_reuse_port(s, 1));
     close(s);
   }
-	#endif
+  #endif
 }
 
 bool grpc_is_socket_reuse_port_supported() {
@@ -501,8 +500,9 @@ static gpr_once g_probe_ipv6_once = GPR_ONCE_INIT;
 static int g_ipv6_loopback_available;
 
 static void probe_ipv6_once(void) {
+  // Force IPv6 probing to fail by purposefully setting an invalid fd in order
+  // to accommodate for compatibility issues with F-stack.
   int fd = -1;
-  // int fd = socket(AF_INET6, SOCK_STREAM, 0);
   g_ipv6_loopback_available = 0;
   if (fd < 0) {
     gpr_log(GPR_INFO, "Disabling AF_INET6 sockets because socket() failed.");
@@ -544,12 +544,11 @@ grpc_error* grpc_create_dualstack_socket(
 
 static int create_socket(grpc_socket_factory* factory, int domain, int type,
                          int protocol) {
-	#ifdef KERNEL_BYPASS
-	int s = ff_socket(domain, type, protocol);
-	std::cout << "ff_socket() = " << s << std::endl;
-	#else
-	int s = socket(domain, type, protocol);
-	#endif
+  #ifdef KERNEL_BYPASS
+  int s = ff_socket(domain, type, protocol);
+  #else
+  int s = socket(domain, type, protocol);
+  #endif
   return (factory != nullptr)
              ? grpc_socket_factory_socket(factory, domain, type, protocol) : s;
 }

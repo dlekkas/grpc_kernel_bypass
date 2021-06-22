@@ -148,14 +148,10 @@ grpc_error* grpc_tcp_server_add_addr(grpc_tcp_server* s,
   return add_socket_to_server(s, fd, addr, port_index, fd_index, listener);
 }
 
-int dummy_loop(void *arg) { return 0; }
-
 /* Prepare a recently-created socket for listening. */
 grpc_error* grpc_tcp_server_prepare_socket(grpc_tcp_server* s, int fd,
                                            const grpc_resolved_address* addr,
                                            bool so_reuseport, int* port) {
-  int bind_ans;
-  struct sockaddr_in my_addr;
   grpc_resolved_address sockname_temp;
   grpc_error* err = GRPC_ERROR_NONE;
 
@@ -193,21 +189,9 @@ grpc_error* grpc_tcp_server_prepare_socket(grpc_tcp_server* s, int fd,
   err = grpc_apply_socket_mutator_in_args(fd, s->channel_args);
   if (err != GRPC_ERROR_NONE) goto error;
 
-	#ifdef KERNEL_BYPASS
-	/*
-	bzero(&my_addr, sizeof(my_addr));
-	my_addr.sin_family = AF_INET;
-	my_addr.sin_port = htons(50051);
-	my_addr.sin_addr.s_addr = htonl(INADDR_ANY); //inet_addr("172.31.13.210");
-	*/
-  //bind_ans = ff_bind(fd, (struct linux_sockaddr *) reinterpret_cast<grpc_sockaddr*>(
-						  //const_cast<char*>(addr->addr)), addr->len); 
-  bind_ans = ff_bind(fd, reinterpret_cast<struct linux_sockaddr *>(
-						  const_cast<char*>(addr->addr)), addr->len); 
-	// bind_ans = ff_bind(fd, (struct linux_sockaddr *) &my_addr, sizeof(my_addr));
-  //std::cout << "ff_bind(" << fd << ",...) = " << bind_ans << std::endl;
-  if (bind_ans < 0) {
-  //if (ff_bind(fd, (struct linux_sockaddr *) &my_addr, sizeof(my_addr)) < 0) {
+  #ifdef KERNEL_BYPASS
+  if (ff_bind(fd, reinterpret_cast<struct linux_sockaddr *>(
+              const_cast<char*>(addr->addr)), addr->len) < 0) { 
     err = GRPC_OS_ERROR(errno, "ff_bind");
     goto error;
   }
@@ -220,12 +204,12 @@ grpc_error* grpc_tcp_server_prepare_socket(grpc_tcp_server* s, int fd,
   sockname_temp.len = static_cast<socklen_t>(sizeof(struct sockaddr_storage));
 
   if (ff_getsockname(fd, (struct linux_sockaddr *) 
-										 reinterpret_cast<grpc_sockaddr*>(sockname_temp.addr),
-                  	 &sockname_temp.len) < 0) {
+                     reinterpret_cast<grpc_sockaddr*>(sockname_temp.addr),
+                     &sockname_temp.len) < 0) {
     err = GRPC_OS_ERROR(errno, "ff_getsockname");
     goto error;
   }
-	#else
+  #else
   if (bind(fd, reinterpret_cast<grpc_sockaddr*>(const_cast<char*>(addr->addr)),
            addr->len) < 0) {
     err = GRPC_OS_ERROR(errno, "bind");
@@ -244,7 +228,7 @@ grpc_error* grpc_tcp_server_prepare_socket(grpc_tcp_server* s, int fd,
     err = GRPC_OS_ERROR(errno, "getsockname");
     goto error;
   }
-	#endif
+  #endif
 
   *port = grpc_sockaddr_get_port(&sockname_temp);
   return GRPC_ERROR_NONE;

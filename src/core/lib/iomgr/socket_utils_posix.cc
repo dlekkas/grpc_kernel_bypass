@@ -38,12 +38,14 @@
 int grpc_accept4(int sockfd, grpc_resolved_address* resolved_addr, int nonblock,
                  int cloexec) {
   int fd, flags;
+  // cloexec is not needed for single-threaded purposes
+  cloexec = 0;
+  nonblock = 0;
 #ifdef KERNEL_BYPASS
   fd = ff_accept(sockfd, (struct linux_sockaddr *) 
-		 reinterpret_cast<grpc_sockaddr*>(resolved_addr->addr),
+                 reinterpret_cast<grpc_sockaddr*>(resolved_addr->addr),
                  &resolved_addr->len);
   if (fd >= 0) {
-	  return fd;
     if (nonblock) {
       flags = ff_fcntl(fd, F_GETFL, 0);
       if (flags < 0) goto close_and_error;
