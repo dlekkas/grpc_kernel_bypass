@@ -759,7 +759,7 @@ class Server::SyncRequestThreadManager : public grpc::ThreadManager {
       : ThreadManager("SyncServer", rq, min_pollers, max_pollers),
         server_(server),
         server_cq_(server_cq),
-        cq_timeout_msec_(cq_timeout_msec),
+        cq_timeout_msec_(100),
         global_callbacks_(std::move(global_callbacks)) {}
 
   WorkStatus PollForWork(void** tag, bool* ok) override {

@@ -28,8 +28,10 @@
 #include <limits.h>
 #include <stdio.h>
 #include <string.h>
+#include <arpa/inet.h>
 
 #include <string>
+#include <iostream>
 
 #include "absl/strings/str_cat.h"
 
@@ -146,10 +148,14 @@ grpc_error* grpc_tcp_server_add_addr(grpc_tcp_server* s,
   return add_socket_to_server(s, fd, addr, port_index, fd_index, listener);
 }
 
+int dummy_loop(void *arg) { return 0; }
+
 /* Prepare a recently-created socket for listening. */
 grpc_error* grpc_tcp_server_prepare_socket(grpc_tcp_server* s, int fd,
                                            const grpc_resolved_address* addr,
                                            bool so_reuseport, int* port) {
+  int bind_ans;
+  struct sockaddr_in my_addr;
   grpc_resolved_address sockname_temp;
   grpc_error* err = GRPC_ERROR_NONE;
 
@@ -163,7 +169,7 @@ grpc_error* grpc_tcp_server_prepare_socket(grpc_tcp_server* s, int fd,
 #ifdef GRPC_LINUX_ERRQUEUE
   err = grpc_set_socket_zerocopy(fd);
   if (err != GRPC_ERROR_NONE) {
-    /* it's not fatal, so just log it. */
+    // it's not fatal, so just log it.
     gpr_log(GPR_DEBUG, "Node does not support SO_ZEROCOPY, continuing.");
     GRPC_ERROR_UNREF(err);
   }
@@ -177,19 +183,31 @@ grpc_error* grpc_tcp_server_prepare_socket(grpc_tcp_server* s, int fd,
     if (err != GRPC_ERROR_NONE) goto error;
     err = grpc_set_socket_reuse_addr(fd, 1);
     if (err != GRPC_ERROR_NONE) goto error;
-    err = grpc_set_socket_tcp_user_timeout(fd, s->channel_args,
-                                           false /* is_client */);
+    err = grpc_set_socket_tcp_user_timeout(fd, s->channel_args, false);
     if (err != GRPC_ERROR_NONE) goto error;
   }
   err = grpc_set_socket_no_sigpipe_if_possible(fd);
   if (err != GRPC_ERROR_NONE) goto error;
 
+
   err = grpc_apply_socket_mutator_in_args(fd, s->channel_args);
   if (err != GRPC_ERROR_NONE) goto error;
 
 	#ifdef KERNEL_BYPASS
-  if (ff_bind(fd, (struct linux_sockaddr *) reinterpret_cast<grpc_sockaddr*>(
-						  const_cast<char*>(addr->addr)), addr->len) < 0) {
+	/*
+	bzero(&my_addr, sizeof(my_addr));
+	my_addr.sin_family = AF_INET;
+	my_addr.sin_port = htons(50051);
+	my_addr.sin_addr.s_addr = htonl(INADDR_ANY); //inet_addr("172.31.13.210");
+	*/
+  //bind_ans = ff_bind(fd, (struct linux_sockaddr *) reinterpret_cast<grpc_sockaddr*>(
+						  //const_cast<char*>(addr->addr)), addr->len); 
+  bind_ans = ff_bind(fd, reinterpret_cast<struct linux_sockaddr *>(
+						  const_cast<char*>(addr->addr)), addr->len); 
+	// bind_ans = ff_bind(fd, (struct linux_sockaddr *) &my_addr, sizeof(my_addr));
+  //std::cout << "ff_bind(" << fd << ",...) = " << bind_ans << std::endl;
+  if (bind_ans < 0) {
+  //if (ff_bind(fd, (struct linux_sockaddr *) &my_addr, sizeof(my_addr)) < 0) {
     err = GRPC_OS_ERROR(errno, "ff_bind");
     goto error;
   }

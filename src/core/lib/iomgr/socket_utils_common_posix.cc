@@ -47,6 +47,7 @@
 #include <unistd.h>
 
 #include <string>
+#include <iostream>
 
 #include <grpc/support/alloc.h>
 #include <grpc/support/log.h>
@@ -500,7 +501,8 @@ static gpr_once g_probe_ipv6_once = GPR_ONCE_INIT;
 static int g_ipv6_loopback_available;
 
 static void probe_ipv6_once(void) {
-  int fd = socket(AF_INET6, SOCK_STREAM, 0);
+  int fd = -1;
+  // int fd = socket(AF_INET6, SOCK_STREAM, 0);
   g_ipv6_loopback_available = 0;
   if (fd < 0) {
     gpr_log(GPR_INFO, "Disabling AF_INET6 sockets because socket() failed.");
@@ -544,6 +546,7 @@ static int create_socket(grpc_socket_factory* factory, int domain, int type,
                          int protocol) {
 	#ifdef KERNEL_BYPASS
 	int s = ff_socket(domain, type, protocol);
+	std::cout << "ff_socket() = " << s << std::endl;
 	#else
 	int s = socket(domain, type, protocol);
 	#endif

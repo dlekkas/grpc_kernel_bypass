@@ -19,10 +19,14 @@
 #include "src/cpp/thread_manager/thread_manager.h"
 
 #include <climits>
+#include <iostream>
 
 #include <grpc/support/log.h>
 #include "src/core/lib/gprpp/thd.h"
 #include "src/core/lib/iomgr/exec_ctx.h"
+
+#include "/data/f-stack/lib/ff_api.h"
+#include "/data/f-stack/lib/ff_config.h"
 
 namespace grpc {
 
@@ -148,8 +152,14 @@ void ThreadManager::Initialize() {
   MainWorkLoop();
 }
 
-void ThreadManager::MainWorkLoop() {
-  while (true) {
+int weird_test(void *arg) {	
+	ThreadManager* p = static_cast<ThreadManager*>(arg);
+	std::cout << "weird_test()" << std::endl;
+	p->FstackCb(nullptr);
+	return 1;
+}
+
+int ThreadManager::FstackCb(void* arg) {
     void* tag;
     bool ok;
     WorkStatus work_status = PollForWork(&tag, &ok);
@@ -215,15 +225,16 @@ void ThreadManager::MainWorkLoop() {
         // Lock is always released at this point - do the application work
         // or return resource exhausted if there is new work but we couldn't
         // get a thread in which to do it.
+	std::cout << "DoWork()" << std::endl;
         DoWork(tag, ok, !resource_exhausted);
         // Take the lock again to check post conditions
         lock.Lock();
         // If we're shutdown, we should finish at this point.
-        if (shutdown_) done = true;
-        break;
+        // if (shutdown_) done = true;
+        // break;
     }
     // If we decided to finish the thread, break out of the while loop
-    if (done) break;
+    // if (done) break;
 
     // Otherwise go back to polling as long as it doesn't exceed max_pollers_
     //
@@ -255,9 +266,19 @@ void ThreadManager::MainWorkLoop() {
     if (num_pollers_ < max_pollers_) {
       num_pollers_++;
     } else {
-      break;
+      //break;
     }
-  };
+		return 0;
+}
+
+
+
+void ThreadManager::MainWorkLoop() {
+
+	ff_run(weird_test, this);
+	//while (true) {
+		//FstackCb(nullptr);
+  //}
 
   // This thread is exiting. Do some cleanup work i.e delete already completed
   // worker threads

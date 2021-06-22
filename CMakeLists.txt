@@ -1999,6 +1999,16 @@ target_include_directories(grpc
     ${_gRPC_UPB_INCLUDE_DIR}
     ${_gRPC_ZLIB_INCLUDE_DIR}
 )
+
+file(GLOB FSTACK_SRC_FILES
+	"src/core/lib/iomgr/ev_epoll1_linux.cc"
+	"src/core/lib/iomgr/socket_utils_common_posix.cc"
+	"src/core/lib/iomgr/socket_utils_posix.cc"
+	"src/core/lib/iomgr/tcp_posix.cc"
+	"src/core/lib/iomgr/tcp_server_utils_posix_common.cc"
+)
+set_property(SOURCE ${FSTACK_SRC_FILES} PROPERTY COMPILE_FLAGS -DKERNEL_BYPASS)
+
 target_link_libraries(grpc
   ${_gRPC_BASELIB_LIBRARIES}
   ${_gRPC_SSL_LIBRARIES}
@@ -2008,6 +2018,8 @@ target_link_libraries(grpc
   ${_gRPC_RE2_LIBRARIES}
   ${_gRPC_UPB_LIBRARIES}
   ${_gRPC_ALLTARGETS_LIBRARIES}
+  -L/data/f-stack/lib fstack
+  -L/data/f-stack/dpdk/build/lib dpdk
   gpr
   address_sorting
   upb
