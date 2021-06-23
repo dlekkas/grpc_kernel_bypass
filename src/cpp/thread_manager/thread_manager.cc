@@ -155,7 +155,6 @@ void ThreadManager::Initialize() {
 int FstackCbStaticWrapper(void *arg) {  
   int ret;
   ThreadManager* p = static_cast<ThreadManager*>(arg);
-  std::cout << "FstackCbStaticWrapper()" << std::endl;
   ret = p->FstackCb(nullptr);
   return ret;
 }
@@ -225,7 +224,6 @@ int ThreadManager::FstackCb(void* arg) {
         // Lock is always released at this point - do the application work
         // or return resource exhausted if there is new work but we couldn't
         // get a thread in which to do it.
-        std::cout << "DoWork()" << std::endl;
         lock.Unlock();
         DoWork(tag, ok, !resource_exhausted);
         // Take the lock again to check post conditions
@@ -271,7 +269,13 @@ int ThreadManager::FstackCb(void* arg) {
 
 void ThreadManager::MainWorkLoop() {
 
+#ifdef KERNEL_BYPASS
   ff_run(FstackCbStaticWrapper, this);
+#else
+  while (true) {
+    FstackCbStaticWrapper(this);
+  }
+#endif
 
   // This thread is exiting. Do some cleanup work i.e delete already completed
   // worker threads
